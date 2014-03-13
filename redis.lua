@@ -10,8 +10,6 @@
 -- LPOP        (bin, count) 
 -- LPUSH       (bin, value)
 -- LPUSHX      (bin, value)
--- LMULTIPUSH  (bin, value_list)
--- LMULTIPUSHX (bin, value_list)
 -- LRANGE      (bin, start, stop)
 -- LREM        (bin, count)
 -- LSET        (bin, index, value)
@@ -20,8 +18,6 @@
 -- RPOPLPUSH   (bin1, bin2)
 -- RPUSH       (bin, value)
 -- RPUSHX      (bin, value)
--- RMULTIPUSH  (bin, value_list)
--- RMULTIPUSHX (bin, value_list)
 --
 -- ############################################
 
@@ -73,7 +69,7 @@ end
 
 function LLEN (rec, bin)
 	if (LEXISTS(rec, bin)) then
-		return list.len(rec[bin])
+		return list.size(rec[bin])
 	else
 		return 0;
 	end
@@ -81,7 +77,11 @@ end
 
 function LPOP (rec, bin, count)
 	if (LEXISTS(rec, bin)) then
-		return list.take(rec[bin], count)
+		local l = rec[bin];
+		local new_l = list.drop(l, count)
+		rec[bin] = new_l;
+		UPDATE(rec);
+		return list.take(l, count);
 	else
 		return nil;
 	end
@@ -103,25 +103,13 @@ function LPUSHX (rec, bin, value)
 	end
 end
 
-function LMULTIPUSH  (rec, bin, value_list)
-	local l = rec[bin];
-	for value in list.iterator(value_list) do
-		list.prepend(l, value)
-	end
-	rec[bin] = l;
-	UPDATE(rec)
-end
-
-function LMULTIPUSHX (rec, bin, value_list)
-	if (LEXISTS(rec, bin)) then
-		LMULTIPUSH(rec, bin, value_list)
-	end
-end
-
 function LRANGE (rec, bin, start, stop)
 	if (LEXISTS(rec, bin)) then
 		local l = rec[bin];
-		local new_l = list.take(l, stop)
+		local new_l = list.take(l, stop + 1)
+		if (start <= 0) then
+			start = 1
+		end
 		return list.drop(new_l, start);
 	end
 end
@@ -159,10 +147,18 @@ end
 
 function RPOP (rec, bin, count)
 	if (LEXISTS(rec, bin)) then
-		local l = rec[bin];
-		local result_list = list.drop(l, list.len(l) - count);
-		rec[bin] = list.take(l, list.len(l) - count)
+		local l     = rec[bin];
+		local result_list = nil;
+		if (list.size(l) <= count) then
+			rec[bin] = nil
+			result_list = rec[bin];
+		else
+        	local start = list.size(l) - count;
+			local result_list = list.drop(l, index)
+			rec[bin] = list.take(l, index)
+		end
 		UPDATE(rec)
+		return result_list
 	end
 end
 
@@ -171,6 +167,9 @@ end
 
 function RPUSH (rec, bin, value)
 	local l = rec[bin];
+	if (l == nil) then
+		l = list()
+	end
 	list.append(l, value)
 	rec[bin] = l;
 	UPDATE(rec)
@@ -179,57 +178,5 @@ end
 function RPUSHX (rec, bin, value)
 	if (LEXISTS(rec,bin)) then
 		RPUSH(rec, bin, value)
-	end
-end
-
-function RMULTIPUSH  (rec, bin, value_list)
-	local l = rec[bin];
-	for value in list.iterator(value_list) do
-		list.append(l, value)
-	end
-	rec[bin] = l;
-	UPDATE(rec)
-end
-
-function RMULTIPUSHX (rec, bin, value_list)
-	if (LEXISTS(rec, bin)) then
-		RMULTIPUSH(rec, bin, value_list)
-	end
-end
-
-
-function push(rec, bin, value) 
-	local stack;
-	if (rec[bin] == nil) then
-		stack = list;
-	else
-		stack = rec[bin]
-	end
-	list.append(stack, val)
-
-	rec[bin] = stack;
-
-	if aerospike:exists(rec) then
-		aerospike:update(rec)
-	else
-		aerospike:create(rec)
-	end
-end
-
-function push(rec, bin, value) 
-	local stack;
-	if (rec[bin] == nil) then
-		stack = list;
-	else
-		stack = rec[bin]
-	end
-	list.append(stack, val)
-
-	rec[bin] = stack;
-
-	if aerospike:exists(rec) then
-		aerospike:update(rec)
-	else
-		aerospike:create(rec)
 	end
 end
