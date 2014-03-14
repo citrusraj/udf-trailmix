@@ -225,7 +225,6 @@ function RPOPLPUSH (rec, bin1, bin2, count)
 			l2 = list()
 		end
 		
-		info("val %s %s", tostring(value_l), tostring(rec[bin1]));
 		if (value_l ~= nil) then
 			for value in list.iterator(value_l) do
 				list.append(l2, value)
@@ -279,7 +278,6 @@ function HDEL(rec, bin, field)
 	if (EXISTS(rec, bin)) then
 		m = rec[bin]
 		m[field] = nil 
-		info("LOLAR %s %s", tostring(field), tostring(m[field]))
 		rec[bin] = m
 		UPDATE(rec)
 	end
@@ -355,7 +353,6 @@ function HMGET(rec, bin, field_list)
 	if (EXISTS(rec, bin)) then
 		local res_list = list()
 		for field in list.iterator(field_list) do
-			info ("HMGET %s",tostring(field))
 			if (rec[bin][field] ~= nil) then
 				list.append(res_list, rec[bin][field])
 			end
@@ -387,7 +384,6 @@ function HSET(rec, bin, field, value)
 	end
 	m[field] = value
 	rec[bin] = m
-	info("REC %s", tostring(rec[bin]))
 	UPDATE(rec)
 	return rec[bin]
 end
