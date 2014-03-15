@@ -1,23 +1,32 @@
+-- Redis API clone for Aerospike 
+--
+-- This file implements the Aerospike UDF for the LIST and HASH redis API. In aerospike 
+-- a bin is a list or a map. A record can have mulitple bins hence many lists and maps
+-- in it. This also means in addition to the key bin name also needs to be specified 
+-- while performing these operation. 
+--
+-- NB: First parameter in the UDF function definition is record which is created by 
+--     system everything else is argument which needs to be passed in, including the
+--     bin name
+--
+-- Usage
+-- ====
+--
+-- aql > register module './redis.lua'
+-- aql > execute redis.LPUSH('tweets", "my simple tweet") where PK = '1'
+-- aql > execute redis.LRANGE("tweets", 1, 2) where PK = '1'
+-- 
+-- TODO
+-- =========
+-- Transform from normal data type to large data type beyond certain threshold
+-- Few command may not support all options
+--
+--
 -- ###########################################
--- Redis List API
+-- LIST : See http://redis.io/commands#list for detail of API
 --
--- See http://redis.io/commands#list for detail of API
---
--- LINDEX      (bin, index)
--- LINSERT     (bin, index)
--- LLEN        (bin)
--- LPOP        (bin, count) 
--- LPUSH       (bin, value)
--- LPUSHX      (bin, value)
--- LRANGE      (bin, start, stop)
--- LREM        (bin, count)
--- LSET        (bin, index, value)
--- LTRIM       (bin, start, stop)
--- RPOP        (bin, count)
--- RPOPLPUSH   (bin1, bin2)
--- RPUSH       (bin, value)
--- RPUSHX      (bin, value)
---
+-- NB: Does not support multi key (RPOPLPUSH on multiple bin is) and blocking
+--     operation is not supported
 -- ############################################
 
 local function EXISTS(rec, bin)
@@ -114,8 +123,9 @@ end
 
 function LPUSHX (rec, bin, value)
 	if (EXISTS(rec)) then
-		LPUSH(rec, bin, value)
+		return LPUSH(rec, bin, value)
 	end
+	return -1
 end
 
 function LPUSHALL (rec, bin, value_list)
@@ -132,19 +142,26 @@ function LPUSHALL (rec, bin, value_list)
 	return length
 end
 
--- Todo proper bounds check and adherence to API
 function LRANGE (rec, bin, start, stop)
 	if (EXISTS(rec, bin)) then
 		local l     = rec[bin]
-		if (start <= 0) then
-			start = 1
+		if (start < 0) then
+			start = #l + start + 1 
 		end
 		if (stop < 0) then
-			stop = #l + 1 - stop
+			stop = #l + stop + 1
 		end
-	
+
+		if (start >= stop) then
+			return list()
+		end
+
 		local new_l = list.take(rec[bin], stop)
-		return list.drop(new_l, start)
+		if (start > 0) then
+			return list.drop(new_l, start)
+		else 
+			return new_l
+		end
 	end
 	return list()
 end
@@ -160,7 +177,7 @@ end
 
 function LREM (rec, bin, count, value)
 	if (EXISTS(rec, bin)) then
-		l = rec[bin];
+		l = rec[bin]
 		if (count == 0) then
 			count = #l
 		end
@@ -179,6 +196,19 @@ end
 function LTRIM (rec, bin, start, stop)
 	if (EXISTS(rec, bin)) then
 		local l = rec[bin]
+		
+		if (start < 0) then
+			start = #l + start + 1 
+		end
+
+		if (stop < 0) then
+			stop = #l + stop + 1
+		end
+
+		if (start >= stop) then
+			return "-Invalid Range"
+		end
+
 		local pre_list  = list.take(l, start)
 		local post_list = list.drop(l, stop)
 		for value in list.iterator(post_list) do
@@ -186,7 +216,9 @@ function LTRIM (rec, bin, start, stop)
 		end
 		rec[bin] = pre_list
 		UPDATE(rec)
+		return "+OK"
 	end
+	return "+Key/Bin Not Found"
 end
 
 function RPOP (rec, bin, count)
@@ -202,10 +234,16 @@ function RPOP (rec, bin, count)
 			rec[bin] = list.take(l, index)
 		end
 		UPDATE(rec)
-		return result_list
+		if (result_list ~= nil) then
+			return result_list
+		else
+			return list()
+		end
 	end
+	return nil
 end
 
+-- Does not support multikey operation only multi bin
 function RPOPLPUSH (rec, bin1, bin2, count)
 	if (EXISTS(rec, bin1)) then
 		local l1  = rec[bin1]
@@ -234,6 +272,7 @@ function RPOPLPUSH (rec, bin1, bin2, count)
 		UPDATE(rec)
 		return value_l
 	end	
+	return list()
 end
 
 function RPUSH (rec, bin, value)
@@ -243,35 +282,24 @@ function RPUSH (rec, bin, value)
 	end
 	list.append(l, value)
 	rec[bin] = l
+	local length = #l
 	UPDATE(rec)
+	return length
 end
 
 function RPUSHX (rec, bin, value)
 	if (EXISTS(rec,bin)) then
-		RPUSH(rec, bin, value)
+		return RPUSH(rec, bin, value)
 	end
+	return -1
 end
 
 
 
 -- ###########################################
--- Redis HASH API
+-- HASH : See http://redis.io/commands#hash for detail of API
 --
--- See http://redis.io/commands#hash for detail of API
---
--- HDEL         (bin, field)
--- HEXISTS      (bin, field)
--- HGET         (bin, field)
--- HGETALL      (bin)
--- HINCRBY      (bin, field, increment)
--- HKEYS        (bin)
--- HLEN         (bin)
--- HMGET        (bin, field_list)
--- HMSET        (bin, map)
--- HSET         (bin, field, value)
--- HSETNX       (bin, field, value)
--- HVALS        (bin)
--- HSCAN        (bin, offset, count)
+-- NB: HINCRBYFLOAT not supported 
 -- ############################################
 
 function HDEL(rec, bin, field) 
@@ -280,42 +308,54 @@ function HDEL(rec, bin, field)
 		m[field] = nil 
 		rec[bin] = m
 		UPDATE(rec)
+		return 1
 	end
-	return "OK"
+	return 0
 end
 
 function HEXISTS(rec, bin, field)
 	if (EXISTS(rec, bin)) and rec[bin][field] ~= nil then
-		return true
+		return 1
 	else
-		return false
+		return 0
 	end
 end
 
 function HGET(rec, bin, field)
 	if (EXISTS(rec, bin)) then
 		return rec[bin][field]
-	else
-		return nil 
 	end
+	return nil 
 end
 
 function HGETALL(rec, bin)
+	local l = list()
 	if (EXISTS(rec, bin)) then
-		return rec[bin]
+		for k,v in map.iterator(rec[bin]) do
+			list.append(l, k);
+			list.append(l, v);
+		end
 	end
+	return l
 end
 
 function HINCRBY(rec, bin, field, increment)
+	local value = 0
+	local m     = map()
 	if (EXISTS(rec, bin)) then
-		local value = rec[bin][field]
-		local m  = rec[bin]
+		if (rec[bin][field] ~= nil) then
+			value = rec[bin][field]
+		end
+		m  = rec[bin]
 		if (type(value) == "number") then
 			m[field] = value + increment
-			rec[bin] = m
+		else
+			m[field] = increment;
 		end
-		UPDATE(rec)
 	end
+	rec[bin] = m
+	UPDATE(rec)
+	return value + increment
 end
 
 function HKEYS(rec, bin) 
@@ -325,9 +365,8 @@ function HKEYS(rec, bin)
 			list.append(keys,k)
 		end
 		return keys
-	else
-		return nil
 	end
+	return list()
 end
 
 function HVALS(rec, bin)
@@ -337,30 +376,33 @@ function HVALS(rec, bin)
 			list.append(vals, v)
 		end
 		return vals
-	else
-		return nil
 	end
+	return list()
 end
 
 function HLEN(rec, bin)
 	if (EXISTS(rec, bin)) then
 		return #rec[bin]
 	end
+	return 0
 end
 
 
 function HMGET(rec, bin, field_list)
+	local exist = 0
 	if (EXISTS(rec, bin)) then
-		local res_list = list()
-		for field in list.iterator(field_list) do
-			if (rec[bin][field] ~= nil) then
-				list.append(res_list, rec[bin][field])
-			end
-		end	
-		return res_list
-	else
-		return nil
+		exist = 1
 	end
+	local res_list = list()
+
+	for field in list.iterator(field_list) do
+		if exist and (rec[bin][field] ~= nil) then
+			list.append(res_list, rec[bin][field])
+		else
+			list.append(res_list, nil);
+		end
+	end
+	return res_list
 end
 
 function HMSET(rec, bin, field_value_map)
@@ -378,31 +420,71 @@ function HMSET(rec, bin, field_value_map)
 end
 
 function HSET(rec, bin, field, value)
+	local created = 0
+	if (EXISTS(rec, bin)) then
+		created = 0
+	else	
+		created = 1
+	end
 	local m = rec[bin]
 	if (m == nil) then
 		m = map()
 	end
+	if (m[field] == nil) then
+		created = 1
+	end
 	m[field] = value
 	rec[bin] = m
 	UPDATE(rec)
-	return rec[bin]
+	return created
 end
 
 function HSETNX(rec, bin, field, value)
+	local created = 0
 	if (EXISTS(rec, bin)) then
+		created = 0
 	else
-		local m = rec[bin]
-		if (m == nil) then
-			return
-		end
-		if (rec[bin][field] ~= nil) then
-			rec[bin][field] = value
-		end
-		UPDATE(rec)
-		return value
+		created = 1
 	end
+	local m = rec[bin]
+	if (m == nil) then
+		m = map()
+	end
+	if (m[field] == nil) then
+		created = 1
+	else 
+		return 0
+	end
+	m[field] = value
+	rec[bin] = m
+	UPDATE(rec)
+	return created
 end
 
 
-function HSCAN(bin, offset, count)
+-- Does not support sophistication of entire API. Only basic, scan with offset and count
+function HSCAN(rec, bin, offset, count)
+	if (count == nil) then
+		count = 10;
+	end
+	if (EXISTS(rec, bin)) then
+		local l = list()
+		local new_offset = 0;
+		for v in map.values(rec[bin]) do
+			new_offset = new_offset + 1
+			if (offset > 0) then
+				offset = offset - 1
+			else 
+				list.append(l, v)
+				count = count - 1;
+				if (count == 0) then
+					break;
+				end
+			end
+		end
+		local res_list = list()
+		list.append(res_list, new_offset)
+		list.append(res_list, l)
+		return res_list
+	end
 end

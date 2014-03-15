@@ -29,9 +29,4 @@ example:
 - aql> Execute redis.LPOP("tweets", 10) 
 
 
-List TODO
-=========
 
-- Improve error bounds and type checks 
-- Transform from normal data type to large data type beyond certain threshold
-- Much more optimal implementation. Only works right now !!
