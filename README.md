@@ -25,7 +25,7 @@ Download .lua files to the local directory. Run aql (https://docs.aerospike.com/
 example: 
 
 - aql> Register Module './redis.lua'
-- aql> Execute redis.LPUSH("tweets", "my simple tweet") where PK = '1'
+- aql> Execute redis.LPUSH('tweets', 'my simple tweet') on test.demo where PK = '1'
 - aql> Execute redis.LPOP("tweets", 10) 
 
 
