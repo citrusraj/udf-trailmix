@@ -352,6 +352,8 @@ function HINCRBY(rec, bin, field, increment)
 		else
 			m[field] = increment;
 		end
+	else
+		m[field] = increment;	
 	end
 	rec[bin] = m
 	UPDATE(rec)
